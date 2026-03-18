@@ -2,42 +2,64 @@
 # Flight Price Alert Bot – Configuration
 # ─────────────────────────────────────────────
 
-# Amadeus API credentials (free tier: https://developers.amadeus.com)
+# ── Flight data provider ───────────────────────────────────────────────────
+# Options:
+#   amadeus        – Amadeus API (real GDS fares, free tier available)
+#   google_flights – Google Flights via SerpAPI (broader coverage incl. budget airlines)
+provider: google_flights
+
+# ── Google Flights / SerpAPI (https://serpapi.com) ────────────────────────
+# Free tier: 100 searches/month. No credit card needed for signup.
+serpapi:
+  api_key: YOUR_SERPAPI_API_KEY
+
+# ── Amadeus API (https://developers.amadeus.com) ──────────────────────────
+# Only needed if provider is 'amadeus' or any route sets provider: amadeus
 amadeus:
   client_id: YOUR_AMADEUS_CLIENT_ID
   client_secret: YOUR_AMADEUS_CLIENT_SECRET
 
-# Discord incoming webhook URL
+# ── Discord incoming webhook URL ──────────────────────────────────────────
 discord:
   webhook_url: YOUR_DISCORD_WEBHOOK_URL
 
-# Default origin airport (IATA code). Can be overridden per route.
+# ── Default origin airport (IATA code) ───────────────────────────────────
+# Can be overridden per route.
 origin: JFK
 
-# Alert when price drops by this percentage or more from the stored baseline
+# Alert when price drops by this % or more from the stored baseline
 alert_threshold_percent: 10
 
-# How often to check prices (in hours)
+# How often to check (in hours)
 schedule:
   interval_hours: 6
 
-# Routes to monitor (one-way flights)
+# ── Routes to monitor (one-way flights) ──────────────────────────────────
+# Required fields:  destination, max_price, travel_date
+# Optional fields:  origin (override default), currency, adults, provider (override global)
 routes:
-  - destination: LHR       # London Heathrow
-    max_price: 400          # Alert if price is at or below this (USD)
+  - destination: LHR          # London Heathrow
+    max_price: 400             # Alert if price ≤ this
     currency: USD
-    travel_date: "2026-06-01"  # YYYY-MM-DD
+    travel_date: "2026-06-01"
     adults: 1
 
-  - destination: NRT       # Tokyo Narita
+  - destination: NRT           # Tokyo Narita
     max_price: 700
     currency: USD
     travel_date: "2026-07-15"
     adults: 1
 
-  - destination: CDG       # Paris Charles de Gaulle
-    origin: BOS             # Override default origin for this route
+  - destination: CDG           # Paris Charles de Gaulle
+    origin: BOS                # Override default origin for this route
     max_price: 350
     currency: USD
     travel_date: "2026-05-20"
     adults: 1
+
+  # Example: use Amadeus for a specific route while the rest use Google Flights
+  # - destination: DXB
+  #   max_price: 600
+  #   currency: USD
+  #   travel_date: "2026-08-10"
+  #   provider: amadeus
