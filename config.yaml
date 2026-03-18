@@ -1,0 +1,43 @@
+# ─────────────────────────────────────────────
+# Flight Price Alert Bot – Configuration
+# ─────────────────────────────────────────────
+
+# Amadeus API credentials (free tier: https://developers.amadeus.com)
+amadeus:
+  client_id: YOUR_AMADEUS_CLIENT_ID
+  client_secret: YOUR_AMADEUS_CLIENT_SECRET
+
+# Discord incoming webhook URL
+discord:
+  webhook_url: YOUR_DISCORD_WEBHOOK_URL
+
+# Default origin airport (IATA code). Can be overridden per route.
+origin: JFK
+
+# Alert when price drops by this percentage or more from the stored baseline
+alert_threshold_percent: 10
+
+# How often to check prices (in hours)
+schedule:
+  interval_hours: 6
+
+# Routes to monitor (one-way flights)
+routes:
+  - destination: LHR       # London Heathrow
+    max_price: 400          # Alert if price is at or below this (USD)
+    currency: USD
+    travel_date: "2026-06-01"  # YYYY-MM-DD
+    adults: 1
+
+  - destination: NRT       # Tokyo Narita
+    max_price: 700
+    currency: USD
+    travel_date: "2026-07-15"
+    adults: 1
+
+  - destination: CDG       # Paris Charles de Gaulle
+    origin: BOS             # Override default origin for this route
+    max_price: 350
+    currency: USD
+    travel_date: "2026-05-20"
+    adults: 1
