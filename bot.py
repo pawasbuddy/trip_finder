@@ -20,6 +20,12 @@ from typing import Optional
 
 import os
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed; use env vars directly
+
 import discord
 from discord import app_commands
 from discord.ext import tasks
