@@ -21,7 +21,7 @@ amadeus:
 
 # ── Discord incoming webhook URL ──────────────────────────────────────────
 discord:
-  webhook_url: YOUR_DISCORD_WEBHOOK_URL
+  webhook_url: https://discordapp.com/api/webhooks/1487839159933604102/CrYCvEGePzSF9W8YKQq2P_lunb0-fTAsfNE9plkgLmWMaoWisbK5WO8BZVCy_2uoGH2b
 
 # ── Default origin airport (IATA code) ───────────────────────────────────
 # Can be overridden per route.
