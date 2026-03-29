@@ -6,6 +6,7 @@ sends Discord alerts when prices drop below a max threshold or fall by a
 configured percentage from the stored baseline.
 
 Slash commands (requires bot_token in config.yaml):
+  /route                  – manage routes in natural language
   /list_routes            – show all monitored routes
   /add_route              – add a new route
   /remove_route           – remove a route
@@ -16,7 +17,7 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import os
 
@@ -26,6 +27,8 @@ try:
 except ImportError:
     pass  # python-dotenv not installed; use env vars directly
 
+import anthropic
+from pydantic import BaseModel
 import discord
 from discord import app_commands
 from discord.ext import tasks
@@ -366,6 +369,132 @@ async def price_check_loop() -> None:
     import asyncio
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, check_routes)
+
+
+# ── Natural language route model ─────────────────────────────────────────────
+
+class RouteAction(BaseModel):
+    action: Literal["add", "remove", "list"]
+    destination: Optional[str] = None      # IATA code e.g. LHR
+    origin: Optional[str] = None           # IATA code, overrides default
+    max_price: Optional[float] = None
+    travel_date: Optional[str] = None      # YYYY-MM-DD
+    currency: Optional[str] = None
+    adults: Optional[int] = None
+    error: Optional[str] = None            # set if Claude couldn't parse
+
+
+def parse_route_request(text: str, default_origin: str) -> RouteAction:
+    """Use Claude to parse a natural language route management request."""
+    ai = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+    response = ai.messages.parse(
+        model="claude-opus-4-6",
+        max_tokens=512,
+        system=(
+            f"You parse flight route management requests into structured data.\n"
+            f"Today's date is {datetime.utcnow().strftime('%Y-%m-%d')}.\n"
+            f"The default origin airport is {default_origin}.\n"
+            "Use IATA airport codes (3 letters). "
+            "If the user mentions a city, convert it to the main IATA code (e.g. London→LHR, Tokyo→NRT, Paris→CDG, NYC→JFK). "
+            "Dates should be YYYY-MM-DD. "
+            "If you cannot determine a required field, set error to explain what's missing."
+        ),
+        messages=[{"role": "user", "content": text}],
+        output_format=RouteAction,
+    )
+    return response.parsed_output
+
+
+@tree.command(name="route", description="Manage routes in natural language")
+@app_commands.describe(request='e.g. "add JFK to London in June under $400" or "remove Tokyo" or "show routes"')
+async def route_natural(interaction: discord.Interaction, request: str) -> None:
+    await interaction.response.defer(ephemeral=True)
+    config = load_config()
+    default_origin = config.get("origin", "JFK")
+
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not anthropic_key or anthropic_key.startswith("your_"):
+        await interaction.followup.send(
+            "ANTHROPIC_API_KEY is not set. Add it to your .env file.", ephemeral=True
+        )
+        return
+
+    try:
+        action = parse_route_request(request, default_origin)
+    except Exception as e:
+        await interaction.followup.send(f"Could not parse request: {e}", ephemeral=True)
+        return
+
+    if action.error:
+        await interaction.followup.send(f"Could not understand request: {action.error}", ephemeral=True)
+        return
+
+    if action.action == "list":
+        routes = config.get("routes", [])
+        if not routes:
+            await interaction.followup.send("No routes configured.", ephemeral=True)
+            return
+        lines = []
+        for i, r in enumerate(routes, 1):
+            origin = r.get("origin", default_origin)
+            lines.append(
+                f"**{i}.** `{origin} → {r['destination']}`  |  "
+                f"{r.get('currency','USD')} {r['max_price']}  |  "
+                f"{r['travel_date']}  |  {r.get('adults',1)} adult(s)"
+            )
+        embed = discord.Embed(title="Monitored Routes", description="\n".join(lines), color=0x4285F4)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    elif action.action == "add":
+        missing = [f for f in ("destination", "max_price", "travel_date") if not getattr(action, f)]
+        if missing:
+            await interaction.followup.send(
+                f"Missing details: {', '.join(missing)}. Please include them in your request.",
+                ephemeral=True,
+            )
+            return
+        new_route: dict = {
+            "destination": action.destination.upper(),
+            "max_price": action.max_price,
+            "travel_date": action.travel_date,
+            "currency": (action.currency or "USD").upper(),
+            "adults": action.adults or 1,
+        }
+        if action.origin:
+            new_route["origin"] = action.origin.upper()
+        config.setdefault("routes", []).append(new_route)
+        save_config(config)
+        effective_origin = (action.origin or default_origin).upper()
+        log.info("Route added via /route: %s → %s on %s", effective_origin, action.destination.upper(), action.travel_date)
+        await interaction.followup.send(
+            f"Added route `{effective_origin} → {action.destination.upper()}` on {action.travel_date} "
+            f"(max {new_route['currency']} {action.max_price}).",
+            ephemeral=True,
+        )
+
+    elif action.action == "remove":
+        if not action.destination:
+            await interaction.followup.send("Please specify which route to remove.", ephemeral=True)
+            return
+        routes = config.get("routes", [])
+        updated = [
+            r for r in routes
+            if not (
+                r["destination"].upper() == action.destination.upper()
+                and (not action.travel_date or r["travel_date"] == action.travel_date)
+            )
+        ]
+        if len(updated) == len(routes):
+            await interaction.followup.send(
+                f"No route found for `{action.destination.upper()}`.", ephemeral=True
+            )
+            return
+        config["routes"] = updated
+        save_config(config)
+        log.info("Route removed via /route: %s", action.destination.upper())
+        await interaction.followup.send(
+            f"Removed route `{action.destination.upper()}`.", ephemeral=True
+        )
 
 
 @tree.command(name="list_routes", description="Show all monitored flight routes")
