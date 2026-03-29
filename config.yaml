@@ -11,7 +11,7 @@ provider: google_flights
 # ── Google Flights / SerpAPI (https://serpapi.com) ────────────────────────
 # Free tier: 100 searches/month. No credit card needed for signup.
 serpapi:
-  api_key: YOUR_SERPAPI_API_KEY
+  api_key: YOUR_SERPAPI_API_KEY  # or set SERPAPI_API_KEY env var
 
 # ── Amadeus API (https://developers.amadeus.com) ──────────────────────────
 # Only needed if provider is 'amadeus' or any route sets provider: amadeus
@@ -25,8 +25,8 @@ amadeus:
 #                Create a bot at https://discord.com/developers/applications
 #                Enable "applications.commands" scope when generating the invite link
 discord:
-  webhook_url: https://discordapp.com/api/webhooks/1487839159933604102/CrYCvEGePzSF9W8YKQq2P_lunb0-fTAsfNE9plkgLmWMaoWisbK5WO8BZVCy_2uoGH2b
-  bot_token: ""   # leave blank — set DISCORD_BOT_TOKEN env var instead
+  webhook_url: YOUR_DISCORD_WEBHOOK_URL  # or set DISCORD_WEBHOOK_URL env var
+  bot_token: YOUR_DISCORD_BOT_TOKEN      # or set DISCORD_BOT_TOKEN env var
 
 # ── Default origin airport (IATA code) ───────────────────────────────────
 # Can be overridden per route.

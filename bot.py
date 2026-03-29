@@ -59,7 +59,19 @@ PROVIDER_COLORS = {
 
 def load_config() -> dict:
     with open(CONFIG_PATH) as f:
-        return yaml.safe_load(f)
+        config = yaml.safe_load(f)
+    # Allow env vars to override config file values
+    if os.environ.get("SERPAPI_API_KEY"):
+        config.setdefault("serpapi", {})["api_key"] = os.environ["SERPAPI_API_KEY"]
+    if os.environ.get("DISCORD_WEBHOOK_URL"):
+        config.setdefault("discord", {})["webhook_url"] = os.environ["DISCORD_WEBHOOK_URL"]
+    if os.environ.get("DISCORD_BOT_TOKEN"):
+        config.setdefault("discord", {})["bot_token"] = os.environ["DISCORD_BOT_TOKEN"]
+    if os.environ.get("AMADEUS_CLIENT_ID"):
+        config.setdefault("amadeus", {})["client_id"] = os.environ["AMADEUS_CLIENT_ID"]
+    if os.environ.get("AMADEUS_CLIENT_SECRET"):
+        config.setdefault("amadeus", {})["client_secret"] = os.environ["AMADEUS_CLIENT_SECRET"]
+    return config
 
 
 def save_config(config: dict) -> None:
