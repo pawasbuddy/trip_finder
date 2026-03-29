@@ -19,9 +19,14 @@ amadeus:
   client_id: YOUR_AMADEUS_CLIENT_ID
   client_secret: YOUR_AMADEUS_CLIENT_SECRET
 
-# ── Discord incoming webhook URL ──────────────────────────────────────────
+# ── Discord ───────────────────────────────────────────────────────────────────
+# webhook_url  – incoming webhook for price alerts (no bot needed)
+# bot_token    – bot token for slash commands (/list_routes, /add_route, /remove_route)
+#                Create a bot at https://discord.com/developers/applications
+#                Enable "applications.commands" scope when generating the invite link
 discord:
   webhook_url: https://discordapp.com/api/webhooks/1487839159933604102/CrYCvEGePzSF9W8YKQq2P_lunb0-fTAsfNE9plkgLmWMaoWisbK5WO8BZVCy_2uoGH2b
+  bot_token: YOUR_DISCORD_BOT_TOKEN
 
 # ── Default origin airport (IATA code) ───────────────────────────────────
 # Can be overridden per route.

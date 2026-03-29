@@ -4,6 +4,11 @@ Flight Price Alert Bot
 Monitors one-way flight prices via Amadeus or Google Flights (SerpAPI) and
 sends Discord alerts when prices drop below a max threshold or fall by a
 configured percentage from the stored baseline.
+
+Slash commands (requires bot_token in config.yaml):
+  /list_routes            – show all monitored routes
+  /add_route              – add a new route
+  /remove_route           – remove a route
 """
 
 import json
@@ -13,9 +18,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import discord
+from discord import app_commands
+from discord.ext import tasks
 import requests
 import yaml
-from apscheduler.schedulers.blocking import BlockingScheduler
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -35,12 +42,27 @@ HISTORY_PATH = BASE_DIR / "price_history.json"
 PROVIDER_AMADEUS = "amadeus"
 PROVIDER_GOOGLE = "google_flights"
 
+PROVIDER_LABELS = {
+    PROVIDER_AMADEUS: "Amadeus",
+    PROVIDER_GOOGLE: "Google Flights",
+}
+
+PROVIDER_COLORS = {
+    PROVIDER_AMADEUS: 0x00B4D8,
+    PROVIDER_GOOGLE: 0x4285F4,
+}
+
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
 def load_config() -> dict:
     with open(CONFIG_PATH) as f:
         return yaml.safe_load(f)
+
+
+def save_config(config: dict) -> None:
+    with open(CONFIG_PATH, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
 # ── Price history (baseline tracking) ────────────────────────────────────────
@@ -71,7 +93,6 @@ def get_cheapest_amadeus(
     adults: int,
     currency: str,
 ) -> Optional[float]:
-    """Fetch cheapest one-way fare from Amadeus Flight Offers Search."""
     try:
         from amadeus import Client, ResponseError
     except ImportError:
@@ -112,7 +133,6 @@ def get_cheapest_google(
     adults: int,
     currency: str,
 ) -> Optional[float]:
-    """Fetch cheapest one-way fare from Google Flights via SerpAPI."""
     api_key = config.get("serpapi", {}).get("api_key", "")
     if not api_key or api_key.startswith("YOUR_"):
         log.error("SerpAPI key not configured. Set serpapi.api_key in config.yaml.")
@@ -125,7 +145,7 @@ def get_cheapest_google(
         "outbound_date": travel_date,
         "currency": currency,
         "adults": adults,
-        "type": "2",          # 1 = round-trip, 2 = one-way
+        "type": "2",
         "api_key": api_key,
     }
 
@@ -176,17 +196,6 @@ def send_discord_alert(webhook_url: str, embeds: list[dict]) -> None:
         log.error("Failed to send Discord alert: %s", e)
 
 
-PROVIDER_LABELS = {
-    PROVIDER_AMADEUS: "Amadeus",
-    PROVIDER_GOOGLE: "Google Flights",
-}
-
-PROVIDER_COLORS = {
-    PROVIDER_AMADEUS: 0x00B4D8,   # sky blue
-    PROVIDER_GOOGLE: 0x4285F4,    # Google blue
-}
-
-
 def build_embed(
     origin: str,
     destination: str,
@@ -218,7 +227,8 @@ def build_embed(
 
 # ── Core check logic ──────────────────────────────────────────────────────────
 
-def check_routes(config: dict) -> None:
+def check_routes() -> None:
+    config = load_config()
     log.info("Starting price check run …")
 
     webhook_url: str = config["discord"]["webhook_url"]
@@ -306,7 +316,6 @@ def validate_config(config: dict) -> None:
         if config.get("serpapi", {}).get("api_key", "").startswith("YOUR_"):
             sys.exit("ERROR: Set your SerpAPI key in config.yaml.")
 
-    # Also check per-route providers
     for route in config.get("routes", []):
         rp = route.get("provider", provider)
         if rp == PROVIDER_AMADEUS and config.get("amadeus", {}).get("client_id", "").startswith("YOUR_"):
@@ -315,34 +324,172 @@ def validate_config(config: dict) -> None:
             sys.exit(f"ERROR: Route {route['destination']} uses Google Flights but SerpAPI key is not set.")
 
 
+# ── Discord bot + slash commands ──────────────────────────────────────────────
+
+intents = discord.Intents.default()
+bot = discord.Client(intents=intents)
+tree = app_commands.CommandTree(bot)
+
+
+@bot.event
+async def on_ready() -> None:
+    await tree.sync()
+    config = load_config()
+    interval_hours: int = int(config.get("schedule", {}).get("interval_hours", 6))
+    price_check_loop.change_interval(hours=interval_hours)
+    price_check_loop.start()
+    log.info("Logged in as %s — slash commands synced, price check every %dh", bot.user, interval_hours)
+
+
+@tasks.loop(hours=6)
+async def price_check_loop() -> None:
+    import asyncio
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, check_routes)
+
+
+@tree.command(name="list_routes", description="Show all monitored flight routes")
+async def list_routes(interaction: discord.Interaction) -> None:
+    config = load_config()
+    routes = config.get("routes", [])
+    default_origin = config.get("origin", "?")
+
+    if not routes:
+        await interaction.response.send_message("No routes configured.", ephemeral=True)
+        return
+
+    lines = []
+    for i, r in enumerate(routes, 1):
+        origin = r.get("origin", default_origin)
+        lines.append(
+            f"**{i}.** `{origin} → {r['destination']}`  |  "
+            f"{r.get('currency','USD')} {r['max_price']}  |  "
+            f"{r['travel_date']}  |  "
+            f"{r.get('adults',1)} adult(s)"
+        )
+
+    embed = discord.Embed(
+        title="Monitored Routes",
+        description="\n".join(lines),
+        color=0x4285F4,
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@tree.command(name="add_route", description="Add a flight route to monitor")
+@app_commands.describe(
+    destination="Destination airport IATA code (e.g. LHR)",
+    max_price="Alert if price drops to or below this amount",
+    travel_date="Departure date (YYYY-MM-DD)",
+    origin="Origin airport IATA code — overrides default",
+    currency="Currency code (default: USD)",
+    adults="Number of adult passengers (default: 1)",
+)
+async def add_route(
+    interaction: discord.Interaction,
+    destination: str,
+    max_price: float,
+    travel_date: str,
+    origin: str = "",
+    currency: str = "USD",
+    adults: int = 1,
+) -> None:
+    config = load_config()
+    new_route: dict = {
+        "destination": destination.upper(),
+        "max_price": max_price,
+        "travel_date": travel_date,
+        "currency": currency.upper(),
+        "adults": adults,
+    }
+    if origin:
+        new_route["origin"] = origin.upper()
+
+    config.setdefault("routes", []).append(new_route)
+    save_config(config)
+
+    effective_origin = origin.upper() if origin else config.get("origin", "?")
+    log.info("Route added via slash command: %s → %s on %s", effective_origin, destination.upper(), travel_date)
+    await interaction.response.send_message(
+        f"Added route `{effective_origin} → {destination.upper()}` on {travel_date} "
+        f"(max {currency.upper()} {max_price}).",
+        ephemeral=True,
+    )
+
+
+@tree.command(name="remove_route", description="Remove a monitored flight route")
+@app_commands.describe(
+    destination="Destination airport IATA code (e.g. LHR)",
+    travel_date="Departure date (YYYY-MM-DD)",
+)
+async def remove_route(
+    interaction: discord.Interaction,
+    destination: str,
+    travel_date: str,
+) -> None:
+    config = load_config()
+    routes = config.get("routes", [])
+    updated = [
+        r for r in routes
+        if not (r["destination"].upper() == destination.upper() and r["travel_date"] == travel_date)
+    ]
+
+    if len(updated) == len(routes):
+        await interaction.response.send_message(
+            f"No route found for `{destination.upper()}` on {travel_date}.",
+            ephemeral=True,
+        )
+        return
+
+    config["routes"] = updated
+    save_config(config)
+    log.info("Route removed via slash command: %s on %s", destination.upper(), travel_date)
+    await interaction.response.send_message(
+        f"Removed route `{destination.upper()}` on {travel_date}.",
+        ephemeral=True,
+    )
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
     config = load_config()
     validate_config(config)
 
-    interval_hours: int = int(config.get("schedule", {}).get("interval_hours", 6))
-    provider = config.get("provider", PROVIDER_AMADEUS)
-    log.info(
-        "Flight Price Alert Bot starting — provider: %s, interval: %dh",
-        PROVIDER_LABELS.get(provider, provider), interval_hours,
-    )
+    bot_token: str = config.get("discord", {}).get("bot_token", "")
+    if not bot_token or bot_token.startswith("YOUR_"):
+        # Fall back to webhook-only mode with APScheduler
+        log.warning("No bot_token set — running in webhook-only mode (no slash commands).")
+        from apscheduler.schedulers.blocking import BlockingScheduler
 
-    check_routes(config)
+        interval_hours: int = int(config.get("schedule", {}).get("interval_hours", 6))
+        provider = config.get("provider", PROVIDER_AMADEUS)
+        log.info(
+            "Flight Price Alert Bot starting — provider: %s, interval: %dh",
+            PROVIDER_LABELS.get(provider, provider), interval_hours,
+        )
 
-    scheduler = BlockingScheduler(timezone="UTC")
-    scheduler.add_job(
-        check_routes,
-        "interval",
-        args=[config],
-        hours=interval_hours,
-        id="price_check",
-        name="Flight price check",
-    )
-    try:
-        scheduler.start()
-    except (KeyboardInterrupt, SystemExit):
-        log.info("Bot stopped.")
+        check_routes()
+
+        scheduler = BlockingScheduler(timezone="UTC")
+        scheduler.add_job(
+            check_routes,
+            "interval",
+            hours=interval_hours,
+            id="price_check",
+            name="Flight price check",
+        )
+        try:
+            scheduler.start()
+        except (KeyboardInterrupt, SystemExit):
+            log.info("Bot stopped.")
+    else:
+        provider = config.get("provider", PROVIDER_AMADEUS)
+        log.info(
+            "Flight Price Alert Bot starting — provider: %s, slash commands enabled",
+            PROVIDER_LABELS.get(provider, provider),
+        )
+        bot.run(bot_token)
 
 
 if __name__ == "__main__":
