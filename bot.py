@@ -18,6 +18,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import os
+
 import discord
 from discord import app_commands
 from discord.ext import tasks
@@ -456,7 +458,10 @@ def main() -> None:
     config = load_config()
     validate_config(config)
 
-    bot_token: str = config.get("discord", {}).get("bot_token", "")
+    bot_token: str = (
+        os.environ.get("DISCORD_BOT_TOKEN")
+        or config.get("discord", {}).get("bot_token", "")
+    )
     if not bot_token or bot_token.startswith("YOUR_"):
         # Fall back to webhook-only mode with APScheduler
         log.warning("No bot_token set — running in webhook-only mode (no slash commands).")
